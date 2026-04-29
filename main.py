@@ -1,9 +1,14 @@
 import src.database as db
 import src.tools.mongo_tools as tools
+import src.utils.schema_loader as schema_loader
 
 client = db.loadClient()
 
 data_db = client["sample_analytics"]
+
+schema = schema_loader.build_full_schema(data_db)
+
+print(schema)
 
 query_1 = {"limit": {"$gt": 9000}}
 query_2 = {"products": "InvestmentStock"}
