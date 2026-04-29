@@ -1,18 +1,19 @@
 from pymongo import MongoClient
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+mongo_uri = os.getenv("MONGO_URI")
 
 
-def loadClient(mongo_uri: str | None):
+def loadClient():
     client = MongoClient(mongo_uri)
     return client
 
 
 def listAllDb(client):
     print(client.list_database_names())
-
-
-def loadDb(DbName: str, client):
-    db = client[DbName]
-    return db
 
 
 def testConnection(client):

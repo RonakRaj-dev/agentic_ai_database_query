@@ -1,12 +1,14 @@
-import os
-from dotenv import load_dotenv
 import src.database as db
 
-
-load_dotenv()
-
-mongo_uri = os.getenv("MONGO_URI")
-
-client = db.loadClient(mongo_uri=mongo_uri)
-
+client = db.loadClient()
 db.testConnection(client)
+
+db.listAllDb(client)
+
+data_db = client["sample_analytics"]
+
+data_db.list_collection_names()
+data = data_db["customers"]
+
+for doc in data.find().limit(5):
+    print(doc)
