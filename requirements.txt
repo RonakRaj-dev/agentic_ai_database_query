@@ -1,0 +1,11 @@
+pandas
+numpy
+agentscope>=0.0.5
+langchain
+langgraph
+gemini3d
+matplotlib
+python-dotenv>=1.0.0
+pymongo>=4.6.0
+google-generativeai>=0.7.0
+openai>=1.30.0

@@ -1,0 +1,107 @@
+"""
+query_agent.py
+--------------
+NL Data Query Agent using AgentScope v1.x API.
+Member 1 owns this file.
+"""
+
+import json
+import os
+
+from agentscope.model import OpenAIChatModel
+from agentscope.formatter import OpenAIChatFormatter
+from agentscope.tool import Toolkit, ToolResponse
+from agentscope.agent import ReActAgent
+
+# ── Hardcode your config paths (Windows style) ────────────────────────────────
+AGENT_CFG = r"C:\Users\gamer\OneDrive\Desktop\AGENTIC_AI\configs\agents_config.json"
+MODEL_CFG  = r"C:\Users\gamer\OneDrive\Desktop\AGENTIC_AI\configs\model_config.json"
+
+from dotenv import load_dotenv
+load_dotenv()
+
+def _load_json(path: str) -> dict | list:
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def _build_toolkit(use_mock: bool = False) -> Toolkit:
+    """
+    use_mock=True  → loads fake data tools (no DB needed)
+    use_mock=False → loads real MongoDB tools from Member 2
+    """
+    if use_mock:
+        from src.tools.mock_tools import query_collection, aggregate_collection, get_schema
+        print("[DEV] Running with MOCK tools — no DB connection required.\n")
+    else:
+        try:
+            from src.tools.mongo_tools import query_collection, aggregate_collection, get_schema
+        except ImportError as e:
+            raise ImportError(
+                "mongo_tools.py not found. Make sure Member 2 has pushed src/tools/mongo_tools.py"
+            ) from e
+
+    toolkit = Toolkit()
+    toolkit.register_tool_function(query_collection)
+    toolkit.register_tool_function(aggregate_collection)
+    toolkit.register_tool_function(get_schema)
+    return toolkit
+
+
+def build_query_agent(use_mock: bool = False) -> ReActAgent:
+    """
+    Build and return a ready-to-use ReActAgent.
+    Call once from main.py.
+    """
+    agent_cfg = _load_json(AGENT_CFG)
+    model_cfg = _load_json(MODEL_CFG)
+
+    # Pick the first config entry (your gemini_model)
+    cfg = model_cfg[0]
+
+    # Resolve API key from env var or use value directly
+    api_key = os.environ.get("GROQ_API_KEY") or cfg.get("api_key", "")
+    print("API KEY LOADED:", api_key[:8] + "..." if api_key else "NOT FOUND")
+
+    # Build Gemini model and formatter directly — no agentscope.init() needed
+    model = OpenAIChatModel(
+        model_name=cfg.get("model_name", "llama-3.3-70b-versatile"),
+        api_key=api_key,
+        client_kwargs={"base_url": "https://api.groq.com/openai/v1"},
+        generate_kwargs=cfg.get("generate_args", {"temperature": 0.2}),
+    )
+    formatter = OpenAIChatFormatter()
+
+    agent = ReActAgent(
+        name=agent_cfg["agent_name"],
+        sys_prompt=agent_cfg["system_prompt"],
+        model=model,
+        formatter=formatter,
+        toolkit=_build_toolkit(use_mock=use_mock),
+        max_iters=agent_cfg.get("max_retries", 5),
+    )
+
+    return agent
+
+
+# ── Quick test entry point ────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import asyncio
+    from agentscope.message import Msg
+
+    async def main():
+        agent = build_query_agent(use_mock=True)
+        print("Agent ready:", agent.name)
+
+        test_questions = [
+            "Show me all employees in Engineering",
+            "Who earns more than 70000?",
+            "What is the average salary by department?",
+        ]
+
+        for q in test_questions:
+            print(f"\nYou: {q}")
+            response = await agent(Msg(name="User", content=q, role="user"))
+            print(f"Agent: {response.content}")
+
+    asyncio.run(main())
