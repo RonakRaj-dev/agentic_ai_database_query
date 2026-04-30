@@ -28,12 +28,18 @@ def _load_json(path):
 
 
 def _build_toolkit(use_mock: bool = False) -> Toolkit:
-    """
-    use_mock=True  → loads fake data tools (no DB needed)
-    use_mock=False → loads real MongoDB tools from Member 2
-    """
     if use_mock:
-        from src.tools.mock_tools import query_collection, aggregate_collection, get_schema
+        from src.tools.mock_tools import (
+            query_collection,
+            aggregate_collection,
+            get_schema,
+        )
+        # count_records is not in mock_tools — define a simple stub
+        from agentscope.tool import ToolResponse
+        def count_records(collection_name: str, field_name: str = "", field_value: str = "") -> ToolResponse:
+            """Count records matching filters (mock mode — returns placeholder)."""
+            return ToolResponse(content=[{"type": "text", "text": '{"count": "N/A (mock mode)"}'}])
+
         print("[DEV] Running with MOCK tools — no DB connection required.\n")
     else:
         try:
@@ -41,11 +47,11 @@ def _build_toolkit(use_mock: bool = False) -> Toolkit:
                 query_collection,
                 aggregate_collection,
                 get_schema,
-                count_records,  # ← renamed from count_documents
+                count_records,
             )
         except ImportError as e:
             raise ImportError(
-                "mongo_tools.py not found. Make sure Member 2 has pushed src/tools/mongo_tools.py"
+                "mongo_tools.py not found. Make sure src/tools/mongo_tools.py exists."
             ) from e
 
     toolkit = Toolkit()
