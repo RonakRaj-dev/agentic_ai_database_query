@@ -4,7 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="147e187c-83bf-400e-9932-9f97c1ec13f2" name="Changes" comment="" />
+    <list default="true" id="147e187c-83bf-400e-9932-9f97c1ec13f2" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/configs/agents_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/configs/agents_config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/configs/model_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/configs/model_config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/agents/query_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/agents/query_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/tools/mongo_tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/tools/mongo_tools.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/schema_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/schema_loader.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -164,7 +173,10 @@
       <workItem from="1777372683705" duration="8864000" />
       <workItem from="1777441716479" duration="4693000" />
       <workItem from="1777448134308" duration="202000" />
-      <workItem from="1777453138873" duration="3932000" />
+      <workItem from="1777453138873" duration="4600000" />
+      <workItem from="1777470468579" duration="4543000" />
+      <workItem from="1777478353607" duration="216000" />
+      <workItem from="1777528131820" duration="9404000" />
     </task>
     <servers />
   </component>
