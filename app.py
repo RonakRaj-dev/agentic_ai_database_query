@@ -1,8 +1,8 @@
 """
 app.py
 ------
-Gradio chat interface — compatible with Gradio 6.x
-Deploy to HuggingFace Spaces as-is.
+Gradio 6.13.0 compatible chat interface.
+HuggingFace Spaces forces gradio==6.13.0 — do NOT pin gradio in requirements.txt
 """
 
 import sys
@@ -43,15 +43,16 @@ async def chat(user_message: str, history: list) -> tuple:
     except Exception as e:
         content = f"Error: {str(e)}"
 
-    history = history + [[user_message, content]]   # ← tuple format, works everywhere
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": content})
     return "", history
 
 
-def clear_chat():
+def clear_chat() -> list:
     return []
 
 
-# ── Gradio 6.x compatible UI ──────────────────────────────────────────────────
+# ── UI ────────────────────────────────────────────────────────────────────────
 with gr.Blocks() as demo:
 
     gr.HTML("""
@@ -73,11 +74,12 @@ with gr.Blocks() as demo:
         with gr.Column(scale=3):
             chatbot = gr.Chatbot(
                 label="Agent Conversation",
-                height=500          # ← Gradio 6.x requires this
+                height=500,
+                type="messages",
             )
             with gr.Row():
                 msg_input = gr.Textbox(
-                    placeholder="Ask something... e.g. Show me all ML Engineers",
+                    placeholder="e.g. Show me all employees in Engineering",
                     label="Your Question",
                     scale=4,
                     lines=1,
@@ -93,7 +95,7 @@ with gr.Blocks() as demo:
                 "Who earns more than 70000?",
                 "List employees from Bangalore",
                 "Average salary by department?",
-                "Show me ML Engineers with 5+ years experience",
+                "Show ML Engineers with 5+ years experience",
                 "How many employees in each city?",
                 "Show me the available fields",
             ]
@@ -114,7 +116,6 @@ with gr.Blocks() as demo:
             Built with **AgentScope** + **Groq**
             """)
 
-    # ── Event handlers ────────────────────────────────────────────────────────
     send_btn.click(
         fn=chat,
         inputs=[msg_input, chatbot],
@@ -130,10 +131,9 @@ with gr.Blocks() as demo:
         outputs=chatbot
     )
 
-
 if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False
+        share=False,
     )
