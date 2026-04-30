@@ -38,21 +38,26 @@ async def chat(user_message: str, history: list) -> tuple:
 
     user_msg = Msg(name="User", content=user_message, role="user")
 
-    try:
-        response = await agent(user_msg)
-        content = response.content
-        if isinstance(content, list):
-            content = "\n".join(
-                c.get("text", "") for c in content if c.get("type") == "text"
-            )
-        if not content:
-            content = "No response generated."
-    except Exception as e:
-        content = f"Error: {str(e)}"
+    content = ""
+    for attempt in range(3):
+        try:
+            response = await agent(user_msg)
+            content = response.content
+            if isinstance(content, list):
+                content = "\n".join(
+                    c.get("text", "") for c in content if c.get("type") == "text"
+                )
+            if content:
+                break
+        except Exception as e:
+            err = str(e)
+            if "failed_generation" in err and attempt < 2:
+                continue
+            content = f"Error: {err}"
+            break
 
-    # Gradio 6.13.0 message format
     history.append({"role": "user",      "content": user_message})
-    history.append({"role": "assistant", "content": content})
+    history.append({"role": "assistant", "content": content or "Could not generate a response. Please rephrase your question."})
     return "", history
 
 

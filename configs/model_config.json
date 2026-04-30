@@ -2,7 +2,7 @@
   {
     "config_name": "groq_model",
     "model_type": "openai_chat",
-    "model_name": "llama3-groq-70b-8192-tool-use-preview",
+    "model_name": "llama-3.3-70b-versatile",
     "api_key": "${GROQ_API_KEY}",
     "client_kwargs": {
       "base_url": "https://api.groq.com/openai/v1"
