@@ -12,15 +12,17 @@ from agentscope.model import OpenAIChatModel
 from agentscope.formatter import OpenAIChatFormatter
 from agentscope.tool import Toolkit, ToolResponse
 from agentscope.agent import ReActAgent
+from pathlib import Path
 
 # ── Hardcode your config paths (Windows style) ────────────────────────────────
-AGENT_CFG = r"C:\Users\gamer\OneDrive\Desktop\AGENTIC_AI\configs\agents_config.json"
-MODEL_CFG  = r"C:\Users\gamer\OneDrive\Desktop\AGENTIC_AI\configs\model_config.json"
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+AGENT_CFG = BASE_DIR / "configs" / "agents_config.json"
+MODEL_CFG = BASE_DIR / "configs" / "model_config.json"
 
 from dotenv import load_dotenv
 load_dotenv()
 
-def _load_json(path: str) -> dict | list:
+def _load_json(path):
     with open(path, "r") as f:
         return json.load(f)
 
