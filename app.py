@@ -43,8 +43,7 @@ async def chat(user_message: str, history: list) -> tuple:
     except Exception as e:
         content = f"Error: {str(e)}"
 
-    history.append({"role": "user", "content": user_message})
-    history.append({"role": "assistant", "content": content})
+    history = history + [[user_message, content]]   # ← tuple format, works everywhere
     return "", history
 
 
@@ -74,8 +73,7 @@ with gr.Blocks() as demo:
         with gr.Column(scale=3):
             chatbot = gr.Chatbot(
                 label="Agent Conversation",
-                height=500,
-                type="messages",          # ← Gradio 6.x requires this
+                height=500          # ← Gradio 6.x requires this
             )
             with gr.Row():
                 msg_input = gr.Textbox(
@@ -137,6 +135,5 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        theme=gr.themes.Soft(),        # ← moved from Blocks() to launch()
         share=False
     )
