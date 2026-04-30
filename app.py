@@ -1,3 +1,10 @@
+"""
+app.py
+------
+Gradio chat interface — compatible with Gradio 6.x
+Deploy to HuggingFace Spaces as-is.
+"""
+
 import sys
 import asyncio
 import os
@@ -21,10 +28,6 @@ print(f"Agent ready. Mode: {'MOCK' if USE_MOCK else 'LIVE MongoDB'}")
 
 # ── Core chat function ────────────────────────────────────────────────────────
 async def chat(user_message: str, history: list) -> tuple:
-    """
-    Called by Gradio on each user message.
-    history format: list of [user_msg, assistant_msg] pairs
-    """
     if not user_message.strip():
         return "", history
 
@@ -40,36 +43,29 @@ async def chat(user_message: str, history: list) -> tuple:
     except Exception as e:
         content = f"Error: {str(e)}"
 
-    history.append([user_message, content])
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": content})
     return "", history
 
 
 def clear_chat():
-    return [], []
+    return []
 
 
-# ── Gradio UI ─────────────────────────────────────────────────────────────────
-with gr.Blocks(
-    title="NL Data Query Agent",
-    theme=gr.themes.Soft(),
-    css="""
-        .header { text-align: center; padding: 20px; }
-        .status-bar { font-size: 12px; color: gray; text-align: center; }
-        .example-btn { font-size: 13px; }
-    """
-) as demo:
+# ── Gradio 6.x compatible UI ──────────────────────────────────────────────────
+with gr.Blocks() as demo:
 
     gr.HTML("""
-        <div class='header'>
+        <div style='text-align:center; padding:20px'>
             <h1>🤖 NL Data Query Agent</h1>
-            <p>Ask questions about the employee dataset in plain English.</p>
+            <p>Ask questions about the dataset in plain English.</p>
         </div>
     """)
 
     gr.HTML(f"""
-        <div class='status-bar'>
+        <div style='font-size:12px; color:gray; text-align:center; margin-bottom:10px'>
             Mode: {'🟡 MOCK DATA' if USE_MOCK else '🟢 Live MongoDB'} &nbsp;|&nbsp;
-            Model: Groq llama-3.3-70b-versatile &nbsp;|&nbsp;
+            Model: Groq llama3-groq-70b-tool-use &nbsp;|&nbsp;
             Framework: AgentScope
         </div>
     """)
@@ -79,7 +75,7 @@ with gr.Blocks(
             chatbot = gr.Chatbot(
                 label="Agent Conversation",
                 height=500,
-                bubble_full_width=False,
+                type="messages",          # ← Gradio 6.x requires this
             )
             with gr.Row():
                 msg_input = gr.Textbox(
@@ -98,27 +94,26 @@ with gr.Blocks(
                 "Show me all employees in Engineering",
                 "Who earns more than 70000?",
                 "List employees from Bangalore",
-                "What is the average salary by department?",
+                "Average salary by department?",
                 "Show me ML Engineers with 5+ years experience",
-                "How many employees are in each city?",
-                "Who are the top earners?",
+                "How many employees in each city?",
                 "Show me the available fields",
             ]
             for example in examples:
-                gr.Button(example, size="sm", elem_classes="example-btn").click(
+                gr.Button(example, size="sm").click(
                     fn=lambda x=example: x,
                     outputs=msg_input
                 )
 
             gr.Markdown("### ℹ️ About")
             gr.Markdown("""
-            This agent uses a **ReAct loop** to:
-            1. Understand your question
-            2. Pick the right tool
-            3. Query the database
-            4. Format the answer
+            **ReAct Agent** loop:
+            1. Understands your question
+            2. Picks the right tool
+            3. Queries the database
+            4. Formats the answer
 
-            Built with **AgentScope** + **Groq** (llama-3.3-70b)
+            Built with **AgentScope** + **Groq**
             """)
 
     # ── Event handlers ────────────────────────────────────────────────────────
@@ -134,7 +129,7 @@ with gr.Blocks(
     )
     clear_btn.click(
         fn=clear_chat,
-        outputs=[chatbot, chatbot]
+        outputs=chatbot
     )
 
 
@@ -142,5 +137,6 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False          # set share=True for a public link locally
+        theme=gr.themes.Soft(),        # ← moved from Blocks() to launch()
+        share=False
     )
