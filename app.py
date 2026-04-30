@@ -3,10 +3,15 @@ app.py
 ------
 Gradio 6.13.0 compatible chat interface.
 HuggingFace Spaces forces gradio==6.13.0 — do NOT pin gradio in requirements.txt
+
+Key facts about Gradio 6.13.0 Chatbot:
+- NO 'type' parameter
+- NO 'bubble_full_width' parameter
+- History must be list of {"role": ..., "content": ...} dicts
+- layout="bubble" or layout="panel" replaces the old type param
 """
 
 import sys
-import asyncio
 import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -40,10 +45,13 @@ async def chat(user_message: str, history: list) -> tuple:
             content = "\n".join(
                 c.get("text", "") for c in content if c.get("type") == "text"
             )
+        if not content:
+            content = "No response generated."
     except Exception as e:
         content = f"Error: {str(e)}"
 
-    history.append({"role": "user", "content": user_message})
+    # Gradio 6.13.0 message format
+    history.append({"role": "user",      "content": user_message})
     history.append({"role": "assistant", "content": content})
     return "", history
 
@@ -52,7 +60,7 @@ def clear_chat() -> list:
     return []
 
 
-# ── UI ────────────────────────────────────────────────────────────────────────
+# ── UI — Gradio 6.13.0 compatible ────────────────────────────────────────────
 with gr.Blocks() as demo:
 
     gr.HTML("""
@@ -72,11 +80,15 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         with gr.Column(scale=3):
+
+            # ── Gradio 6.13.0: no 'type', use 'layout' instead ───────────────
             chatbot = gr.Chatbot(
                 label="Agent Conversation",
                 height=500,
-                type="messages",
+                layout="bubble",        # "bubble" or "panel" — replaces type=
+                show_label=True,
             )
+
             with gr.Row():
                 msg_input = gr.Textbox(
                     placeholder="e.g. Show me all employees in Engineering",
@@ -116,6 +128,7 @@ with gr.Blocks() as demo:
             Built with **AgentScope** + **Groq**
             """)
 
+    # ── Event handlers ────────────────────────────────────────────────────────
     send_btn.click(
         fn=chat,
         inputs=[msg_input, chatbot],
