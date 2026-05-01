@@ -1,0 +1,586 @@
+================================================================
+NL DATA QUERY AGENT — DEEP TECHNICAL DIVE
+================================================================
+A complete explanation of every architectural decision, concept,
+and component in this project. Written for students and juniors
+who want to understand the "why" behind every choice.
+================================================================
+
+
+================================================================
+SECTION 1: WHAT IS AN AGENT?
+================================================================
+
+Before diving into the code, let's establish what an "agent"
+actually means in the context of AI systems.
+
+A traditional AI system works like this:
+    Input → LLM → Output
+
+You give it a question. It gives you an answer. That's it.
+There's no decision-making, no tool use, no iteration.
+
+An AI Agent works like this:
+    Input → LLM → Decision → Tool → Result → LLM → Decision → ...
+
+The agent is in a loop. It:
+1. Receives a goal (user's question)
+2. Thinks about what to do (reasoning)
+3. Takes an action (calls a tool)
+4. Observes the result
+5. Thinks again — is the goal achieved?
+6. If not, takes another action
+7. Repeats until done
+
+This loop is called the "agentic loop" and it's what separates
+a simple chatbot from a true AI agent.
+
+In our project, the goal is: "answer the user's database question."
+The agent loops through: understand → query DB → format answer.
+
+
+================================================================
+SECTION 2: THE REACT PATTERN — OUR AGENT'S BRAIN
+================================================================
+
+We use the ReAct pattern (Reason + Act). It was introduced in
+a 2022 research paper and is now the industry standard for
+building tool-using agents.
+
+ReAct works like this:
+
+    Thought: I need to find Engineering employees.
+    Action: query_collection(department="Engineering")
+    Observation: [{"name": "Aryan", ...}, {"name": "Kiran", ...}]
+    Thought: I have the results. I'll format them for the user.
+    Final Answer: Here are the Engineering employees: ...
+
+Why ReAct specifically?
+
+1. TRANSPARENCY: You can see every step. Unlike black-box LLMs,
+   ReAct makes the agent's reasoning visible. This is critical
+   for debugging and for demos.
+
+2. TOOL CALLING: ReAct naturally integrates tool use into the
+   reasoning process. The agent decides WHICH tool to call and
+   with WHAT parameters based on its reasoning.
+
+3. ERROR RECOVERY: If a tool call fails, the agent sees the
+   error in "Observation" and can try a different approach.
+   Our logs showed this in action — when "min_limit" failed,
+   the agent called get_schema() to understand the correct
+   parameter names, then retried.
+
+4. ITERATIVE REFINEMENT: Complex questions may require multiple
+   tool calls. ReAct handles this naturally because it loops.
+
+AgentScope's ReActAgent class implements this pattern out of
+the box. That's why we chose it.
+
+
+================================================================
+SECTION 3: WHY AGENTSCOPE?
+================================================================
+
+We evaluated several agent frameworks:
+- LangChain / LangGraph
+- CrewAI
+- AutoGen
+- AgentScope
+
+We chose AgentScope for these reasons:
+
+REASON 1: CLEAN TOOL REGISTRATION API
+LangChain requires decorators, special Tool wrappers, and
+separate schema definitions. AgentScope just needs:
+    toolkit.register_tool_function(my_function)
+Python docstrings automatically become the tool description.
+Type hints automatically become the parameter schema.
+No boilerplate.
+
+REASON 2: BUILT-IN STUDIO UI
+AgentScope ships with a web-based Studio that visualises
+agent conversations, tool call traces, and reasoning steps.
+This is invaluable for learning and demonstrations. You can
+literally watch the agent think.
+
+REASON 3: MULTI-AGENT READY
+As the project grows, AgentScope supports multi-agent
+pipelines natively. We could add a "Validator Agent" that
+checks query results before returning them to the user,
+or a "Planner Agent" that breaks complex questions into
+sub-queries. The architecture supports this without a rewrite.
+
+REASON 4: ASYNC-FIRST
+AgentScope v1.x is fully async. This is essential for
+Gradio deployment because Gradio's event handlers run in
+an async context. We saw this when we had to switch from
+agent(msg) to await agent(msg).
+
+
+================================================================
+SECTION 4: THE TOOLS — HOW THE AGENT INTERACTS WITH MONGODB
+================================================================
+
+Tools are the agent's hands. The LLM (the brain) decides what
+to do. Tools actually do it.
+
+We built 4 tools:
+
+------ TOOL 1: get_schema(collection_name) ------
+
+PURPOSE: Lets the agent discover what data is available before
+querying. Equivalent to a human looking at a table's column
+names before writing a SQL query.
+
+WHY IT'S NEEDED: The LLM doesn't know your database schema.
+Without this tool, it would guess field names and fail.
+With it, the agent can introspect the schema at runtime and
+adapt to ANY collection — not just the ones it was trained on.
+
+WHAT IT RETURNS:
+{
+  "collection": "accounts",
+  "document_count": 1746,
+  "fields": ["account_id", "limit", "products"],
+  "sample_record": {"account_id": 371138, "limit": 9000, ...}
+}
+
+------ TOOL 2: query_collection(...) ------
+
+PURPOSE: Fetch filtered documents from any collection.
+
+WHY GENERIC PARAMETERS INSTEAD OF MONGODB FILTERS:
+We initially tried passing raw MongoDB filter dicts as parameters:
+    query_collection(filter_dict={"limit": {"$gt": 9000}})
+
+Gemini rejected this with "unknown field additional_properties".
+Groq's LLaMA invented parameters like "min_limit" that didn't exist.
+
+The fix: flatten the interface into typed scalar parameters:
+    numeric_field="limit", min_value=9001
+
+Now the tool schema contains only string and number types.
+LLMs handle these reliably. The tool internally converts them
+to the correct MongoDB operators ($gt, $lt, $gte, $lte).
+
+This is called "schema-friendly tool design" — design tool
+parameters around what LLMs can reliably produce, not around
+what would be most flexible for a human developer.
+
+KEY PARAMETERS:
+- field_name + field_value → exact/regex match on string fields
+- numeric_field + min_value/max_value → range queries
+- array_field + array_contains → array membership ($in operator)
+- nested_field + nested_value → dot-notation for embedded docs
+- limit → hard cap on results (prevents token overflow)
+
+------ TOOL 3: aggregate_collection(...) ------
+
+PURPOSE: Grouping and statistical operations — "average salary
+by department", "count accounts per product", etc.
+
+KEY INSIGHT — THE UNWIND PROBLEM:
+MongoDB's products field stores arrays like:
+    ["InvestmentStock", "Commodity", "Brokerage"]
+
+A simple $group on "products" groups by the ENTIRE array as
+a key. So you get 100+ unique combinations, producing hundreds
+of result rows — blowing past Groq's 12k token limit.
+
+The fix: $unwind first. This MongoDB stage "explodes" arrays
+into individual documents:
+    Before: {products: ["InvestmentStock", "Commodity"]}
+    After:  {products: "InvestmentStock"}
+            {products: "Commodity"}
+
+Now $group works on individual product names and gives you
+clean counts per product.
+
+We exposed this as a parameter: unwind_array=True
+The agent learned to set this when grouping array fields.
+
+------ TOOL 4: count_records(...) ------
+
+PURPOSE: Answer "how many" questions WITHOUT fetching all documents.
+
+WHY SEPARATE FROM query_collection:
+Without this tool, when asked "how many active customers?",
+the agent would call query_collection(), fetch all 500 records,
+send them all to the LLM, and blow past the token limit.
+
+count_records() calls MongoDB's count_documents() which returns
+a single integer — not the actual documents. The response is:
+    {"count": 423, "filter_applied": {"active": true}}
+
+This is 10 tokens instead of 50,000. Critical for free-tier APIs.
+
+This is a common pattern in production AI systems: separate
+"count" operations from "fetch" operations to control costs.
+
+
+================================================================
+SECTION 5: WHY GROQ INSTEAD OF OPENAI/ANTHROPIC/GEMINI?
+================================================================
+
+We tried multiple LLM providers during development:
+
+GEMINI (tried first):
+- Free tier with generous quota
+- REJECTED our tool schemas with "unknown field additional_properties"
+- Root cause: Gemini's function calling API doesn't support
+  dict or list parameter types. Our initial tools used these.
+- We fixed the schema but hit quota limits (daily cap very low)
+- Verdict: Good model, strict schema requirements, limited quota
+
+OPENAI:
+- Best function calling reliability
+- GPT-4o-mini works perfectly
+- NOT free — requires payment
+- Verdict: Production choice, not for a student project
+
+ANTHROPIC (Claude):
+- Excellent reasoning and tool use
+- Not free
+- Verdict: Same as OpenAI
+
+GROQ (final choice):
+- FREE tier with reasonable limits (token/min based, not daily)
+- OpenAI-compatible API — we just change base_url
+- llama-3.3-70b-versatile supports function/tool calling
+- Fastest inference of all options (they use custom H100 clusters)
+- Verdict: Best free option for tool-calling agents
+
+HOW WE USE GROQ WITH AGENTSCOPE:
+AgentScope doesn't have a native Groq model type. But Groq
+exposes an OpenAI-compatible REST API. So we use:
+    model_type = "openai_chat"
+    base_url = "https://api.groq.com/openai/v1"
+
+The OpenAI client library talks to Groq's servers. AgentScope
+never knows the difference. This is a common pattern called
+"LLM provider abstraction" — one interface, multiple backends.
+
+
+================================================================
+SECTION 6: THE TOKEN LIMIT PROBLEM AND HOW WE SOLVED IT
+================================================================
+
+The biggest practical challenge in this project was token limits.
+
+THE PROBLEM:
+When asked "How many accounts exist for each product type?",
+the agent:
+1. Called query_collection() with no filters
+2. Got all 1746 accounts back
+3. Tried to send them all to Groq
+4. Got error: "Requested 20005 tokens, limit 12000"
+
+This is a fundamental challenge in agentic AI: agents can
+accidentally generate massive context windows.
+
+OUR SOLUTIONS:
+
+SOLUTION 1: Hard limit on query results
+    safe_limit = min(int(limit), 20)
+    results = collection.find(query).limit(safe_limit)
+Never return more than 20 documents regardless of what
+the agent requests.
+
+SOLUTION 2: count_records tool
+For "how many" questions, return a count (1 number) instead
+of all matching documents (thousands of records).
+
+SOLUTION 3: Aggregate with $limit
+    pipeline = [..., {"$limit": 10}]
+Aggregation results are capped at 10 groups.
+
+SOLUTION 4: $unwind for arrays
+Prevents the "product combination explosion" that produced
+100+ unique groups from just 1746 documents.
+
+SOLUTION 5: System prompt brevity
+Shorter system prompts leave more room for tool results.
+We trimmed our system prompt from ~800 tokens to ~200 tokens.
+
+LESSON LEARNED: In production AI systems, token budget
+management is as important as the AI logic itself. Every
+token you save is money saved and reliability gained.
+
+
+================================================================
+SECTION 7: THE GRADIO DEPLOYMENT JOURNEY
+================================================================
+
+Deploying to HuggingFace Spaces introduced several lessons:
+
+LESSON 1: HuggingFace forces its own Gradio version
+HF Spaces installs gradio==6.13.0 regardless of what you
+specify in requirements.txt. If you pin a different version,
+you get a dependency conflict build error.
+FIX: Remove gradio from requirements.txt entirely.
+
+LESSON 2: Gradio API changes between versions
+APIs we used that broke between versions:
+- gr.Blocks(theme=...) → moved to demo.launch(theme=...)
+- gr.Chatbot(type="messages") → removed, use layout="bubble"
+- gr.Chatbot(bubble_full_width=False) → removed entirely
+- history as [[user, assistant]] → changed to [{"role":..., "content":...}]
+
+LESSON 3: Async matters for Gradio
+AgentScope v1.x is async. Gradio 6.x supports async event
+handlers. We had to use:
+    async def chat(user_message, history):
+        response = await agent(user_msg)
+Without await, the response was a coroutine object, not data.
+
+LESSON 4: Secrets vs Variables in HF Spaces
+API keys must be added as "Secrets" (encrypted, not visible
+in logs). Regular config values can be "Variables". Never
+hardcode keys in app.py — they become part of the public
+git history.
+
+
+================================================================
+SECTION 8: THE MOCK TOOLS PATTERN
+================================================================
+
+One of the best architectural decisions we made was building
+mock_tools.py alongside mongo_tools.py.
+
+The pattern:
+- mongo_tools.py → production tools (real DB)
+- mock_tools.py → identical interface, hardcoded fake data
+
+Both files export the same 4 functions with identical signatures:
+    query_collection(...)
+    aggregate_collection(...)
+    get_schema()
+    count_records(...)
+
+The agent never knows which one it's using. The switch happens
+at startup via a single flag: use_mock=True/False.
+
+WHY THIS IS VALUABLE:
+
+1. PARALLEL DEVELOPMENT: Member 1 (agent) and Member 2 (DB)
+   can work simultaneously. Member 1 doesn't need Member 2's
+   code to test the agent.
+
+2. CI/CD TESTING: Automated tests can run without a real DB
+   connection. Faster, cheaper, more reliable.
+
+3. DEMO SAFETY: For live demos, use mock mode. No risk of
+   the DB being down, slow, or showing sensitive data.
+
+4. DEBUGGING: When something goes wrong, switch to mock mode
+   to isolate whether the bug is in the agent or the DB layer.
+
+This is called "dependency injection" — injecting either the
+real or mock implementation at runtime. It's a fundamental
+software engineering pattern used in professional codebases.
+
+
+================================================================
+SECTION 9: SCHEMA INJECTION INTO THE SYSTEM PROMPT
+================================================================
+
+One of the more sophisticated things we do is dynamically
+building the agent's system prompt from the actual database schema.
+
+STATIC APPROACH (what most tutorials do):
+    system_prompt = "The database has these fields: name, salary, dept..."
+
+Problem: If the schema changes, you must update the prompt manually.
+Problem: Doesn't work with multiple databases.
+
+OUR DYNAMIC APPROACH:
+    schema = schema_loader.build_full_schema(db)
+    system_prompt = build_dynamic_system_prompt(db, collection_name)
+
+At startup, we:
+1. Connect to MongoDB
+2. Introspect all collections with .find_one() and .count_documents()
+3. Extract field names, document counts, sample records
+4. Inject this into the system prompt as structured text
+
+The agent now has real, current knowledge of the database
+it's working with — not hardcoded assumptions.
+
+This is how production AI assistants work. Salesforce Einstein,
+GitHub Copilot for databases, and enterprise data assistants
+all do some form of schema injection. You built a mini version.
+
+
+================================================================
+SECTION 10: WHY NOT LANGCHAIN?
+================================================================
+
+LangChain is the most popular agent framework. Why didn't we use it?
+
+LANGCHAIN PROS:
+- Massive ecosystem (1000s of integrations)
+- Large community, lots of tutorials
+- Many pre-built chains for common tasks
+
+LANGCHAIN CONS FOR THIS PROJECT:
+1. COMPLEXITY: LangChain has multiple ways to do everything.
+   Agents, chains, LCEL, runnables — the API has changed 4 times.
+   For learning, the abstraction obscures what's happening.
+
+2. BOILERPLATE: A simple tool requires:
+   - @tool decorator
+   - Pydantic schema class
+   - Tool description string
+   - StructuredTool wrapper
+   AgentScope just needs a Python function with type hints.
+
+3. DEBUGGING: LangChain's intermediate steps are hard to observe.
+   AgentScope's verbose=True prints the full ReAct trace.
+
+4. LANGGRAPH: If we used LangGraph (LangChain's agent framework),
+   we'd need to define State, Nodes, Edges, and a graph structure.
+   It's powerful for complex multi-agent workflows but overkill
+   for a single ReAct agent querying a database.
+
+VERDICT: For learning agentic AI, AgentScope's simpler API
+makes the concepts clearer. For production systems at scale,
+LangGraph would be worth the complexity.
+
+
+================================================================
+SECTION 11: WHAT IS DIFFERENT ABOUT AGENTSCOPE V1.X
+================================================================
+
+We hit many bugs because AgentScope v1.x completely rewrote its API.
+
+KEY CHANGES FROM v0.x TO v1.x:
+
+SERVICE TOOLKIT → TOOLKIT:
+    # Old v0.x
+    from agentscope.service import ServiceToolkit, ServiceResponse, ServiceExecStatus
+    toolkit = ServiceToolkit()
+    toolkit.add(my_function)
+    ServiceResponse(status=ServiceExecStatus.SUCCESS, content=data)
+
+    # New v1.x
+    from agentscope.tool import Toolkit, ToolResponse
+    toolkit = Toolkit()
+    toolkit.register_tool_function(my_function)
+    ToolResponse(content=[{"type": "text", "text": json.dumps(data)}])
+
+AGENT INITIALIZATION:
+    # Old v0.x
+    ReActAgent(model_config_name="my_config", service_toolkit=toolkit)
+
+    # New v1.x — model object required
+    model = OpenAIChatModel(model_name=..., api_key=...)
+    formatter = OpenAIChatFormatter()
+    ReActAgent(model=model, formatter=formatter, toolkit=toolkit)
+
+ASYNC:
+    # Old v0.x — synchronous
+    response = agent(msg)
+
+    # New v1.x — fully async
+    response = await agent(msg)
+
+These changes mean most tutorials and Stack Overflow answers
+for AgentScope are outdated. Always check the GitHub source
+code for the actual current API.
+
+
+================================================================
+SECTION 12: PRODUCTION READINESS — WHAT'S MISSING
+================================================================
+
+This project is a solid prototype. Here's what would be needed
+to make it production-ready:
+
+1. CONVERSATION MEMORY
+   Currently, each question is stateless. The agent forgets
+   the previous question. A production system would use
+   AgentScope's memory module or a vector store to maintain
+   conversation context.
+
+2. AUTHENTICATION
+   The Gradio app has no login. Anyone can use your Groq quota.
+   HuggingFace Spaces supports OAuth — you could gate access
+   to logged-in users.
+
+3. RATE LIMITING
+   No protection against a user sending 1000 queries and
+   exhausting the Groq free tier in minutes.
+
+4. STREAMING RESPONSES
+   Currently the agent waits until it has a full answer before
+   showing anything. Streaming would show text as it's generated,
+   making the UX feel faster.
+
+5. QUERY VALIDATION
+   No validation that the agent's tool call parameters are
+   sensible before executing. A malformed query could return
+   garbage or throw an unhandled exception.
+
+6. MONITORING
+   No logging of queries, response times, or errors to an
+   external system. Production systems use tools like Langfuse,
+   Weights & Biases, or custom dashboards.
+
+7. CACHING
+   Repeated identical queries hit the LLM and DB every time.
+   Caching common queries would reduce costs and latency.
+
+
+================================================================
+SECTION 13: GLOSSARY
+================================================================
+
+AGENT: An AI system that uses tools and reasoning loops to
+accomplish goals, rather than just generating text.
+
+REACT: Reason + Act. A pattern where the LLM alternates between
+thinking (Thought) and doing (Action), observing results
+between each action.
+
+TOOL / FUNCTION CALLING: The ability for an LLM to decide to
+call a Python function, specify its parameters, and use the
+result in its response.
+
+TOOLKIT: A collection of tools registered with an agent.
+The agent can choose any tool from its toolkit.
+
+SYSTEM PROMPT: Instructions given to the LLM at the start
+of every conversation. Defines the agent's persona, available
+tools, and rules.
+
+TOKEN: The unit of text that LLMs process. Roughly 1 token =
+0.75 words. LLMs have context windows (max tokens) and APIs
+charge by token count.
+
+SCHEMA INJECTION: Dynamically inserting database schema
+information into the system prompt so the agent knows what
+data is available.
+
+MOCK TOOLS: Test implementations of real tools that return
+hardcoded data. Used for testing without real dependencies.
+
+UNWIND: A MongoDB aggregation stage ($unwind) that deconstructs
+array fields into individual documents.
+
+ASYNC: Asynchronous programming. Code that can pause and resume,
+allowing other operations to run while waiting. Required for
+AgentScope v1.x and Gradio event handlers.
+
+FORMATTER: In AgentScope v1.x, a class that converts messages
+into the format expected by a specific LLM provider (OpenAI,
+Gemini, Anthropic each have different formats).
+
+DEPENDENCY INJECTION: A pattern where an object's dependencies
+(like database connections or tool implementations) are passed
+in from outside rather than created internally. Enables swapping
+real implementations for mocks.
+
+================================================================
+END OF DOCUMENT
+================================================================
