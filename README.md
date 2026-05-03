@@ -1,3 +1,15 @@
+---
+title: NL Data Query Agent
+emoji: 🤖
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: "6.13.0"
+python_version: "3.13"
+app_file: app.py
+pinned: false
+---
+
 # 🤖 NL Data Query Agent
 
 A conversational AI agent that lets users query MongoDB databases using plain English — no SQL, no code, no filters required.
